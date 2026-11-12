@@ -59,23 +59,16 @@ label.s input[type=range]{grid-column:1/3;width:100%}
   <canvas id="roiView" width="400" height="400"></canvas>
   <div>
     <button data-tap="sample">👆 Jungler'a dokun</button>
-    <button data-tap="zone">🖌️ Bölge boya</button>
     <button data-tap="red">🎨 Kırmızı örnekle</button>
-  </div>
-  <div>
-    <button id="btnIgnore">🏰 Şu anki kırmızıları yok say</button>
-    <button id="btnClearIgnore">Yok sayılanları sil</button>
-    <button id="btnZonesAll">Bölgeleri sıfırla</button>
   </div>
   <div id="samples"></div>
   <button id="btnClearSamples">Jungler örneklerini sil</button>
   <div id="info"></div>
   <p class="hint">
-    <b>Turkuaz</b> = kırmızı algılanan pikseller. <b>Kırmızı kutu</b> = uyarı veren düşman, <b>gri kutu</b> = aday ama eşleşmedi/yok sayıldı (yanındaki % jungler benzerliği).<br>
-    • <b>Jungler'a dokun</b>: minimapte düşman jungler görününce ikonuna dokun → sadece o şampiyonda uyarır. (Ya da TAB tablosundaki portresini <b>Ekrandan Jungler Örnekle</b> ile kutula.) Örnek yoksa bölgedeki <i>her</i> düşmanda uyarır.<br>
-    • <b>Bölge boya</b>: karartılan hücreler izlenmez (ör. düşman üssü).<br>
-    • <b>Şu anki kırmızıları yok say</b>: oyun başında basarak düşman kulelerini filtrele.<br>
-    • <b>Kırmızı örnekle</b>: algılama kötüyse bir düşman ikonunun kırmızı çerçevesine dokun, renk ayarı otomatik yapılır.
+    <b>Turkuaz</b> = kırmızı algılanan pikseller.<br>
+    <b>Kırmızı kutu</b> = jungler (uyarı veriyor) · <b>Gri kutu</b> = başka düşman şampiyon · <b>Kesikli gri</b> = yuvarlak değil (kule vb.), yok sayıldı.<br>
+    • <b>Jungler'a dokun</b>: düşman jungler minimapte görününce ikonuna dokun → sadece onda uyarır. Örnek yoksa her düşman şampiyonda uyarır.<br>
+    • <b>Kırmızı örnekle</b>: algılama kötüyse bir düşman ikonunun kırmızı çerçevesine dokun.
   </p>
 </div>
 
@@ -85,15 +78,16 @@ label.s input[type=range]{grid-column:1/3;width:100%}
   <label class="chk"><input type="checkbox" data-k="voice"> Sesli uyarı ("Jungler altta!")</label>
   <label class="chk"><input type="checkbox" data-k="vib"> Titreşim</label>
   <label class="chk"><input type="checkbox" data-k="showMask"> Algılama maskesini göster</label>
+  <label class="s">Görünür kaldıkça tekrar uyar (sn, 0 = kapalı) <span class="v"></span><input type="range" data-k="cooldown" min="0" max="30"></label>
   <label class="s">Jungler benzerlik eşiği (%) <span class="v"></span><input type="range" data-k="sim" min="30" max="99"></label>
-  <label class="s">Tekrar uyarı bekleme (sn) <span class="v"></span><input type="range" data-k="cooldown" min="0" max="60"></label>
+  <label class="s">Yuvarlaklık eşiği (%) — kuleleri eler <span class="v"></span><input type="range" data-k="ring" min="30" max="100"></label>
+  <label class="s">Min ikon boyu (% minimap) — minyonları eler <span class="v"></span><input type="range" data-k="minSize" min="1" max="20" step="0.5"></label>
+  <label class="s">Max ikon boyu (% minimap) <span class="v"></span><input type="range" data-k="maxSize" min="3" max="40"></label>
   <label class="s">Onay için gereken kare sayısı <span class="v"></span><input type="range" data-k="frames" min="1" max="10"></label>
   <label class="s">Kırmızı ton (hue°) <span class="v"></span><input type="range" data-k="hue" min="0" max="359"></label>
   <label class="s">Ton toleransı <span class="v"></span><input type="range" data-k="hueTol" min="3" max="60"></label>
   <label class="s">Min doygunluk <span class="v"></span><input type="range" data-k="sat" min="0" max="100"></label>
   <label class="s">Min parlaklık <span class="v"></span><input type="range" data-k="val" min="0" max="100"></label>
-  <label class="s">Min ikon boyu (% minimap) <span class="v"></span><input type="range" data-k="minSize" min="1" max="20"></label>
-  <label class="s">Max ikon boyu (% minimap) <span class="v"></span><input type="range" data-k="maxSize" min="3" max="40"></label>
   <button id="btnReset">Ayarları varsayılana döndür</button>
 </div>
 
@@ -105,16 +99,19 @@ const roiView = $('roiView'), vctx = roiView.getContext('2d');
 const work = document.createElement('canvas');
 const wctx = work.getContext('2d', { willReadFrequently: true });
 
-const GRID = 12, WW = 200, KEY = 'jungleWatch_v1';
-const DEF = { hue: 0, hueTol: 20, sat: 45, val: 35, minSize: 4, maxSize: 13, sim: 80, frames: 3, cooldown: 8,
+const WW = 200, KEY = 'jungleWatch_v1', VER = 2;
+const DEF = { hue: 0, hueTol: 20, sat: 45, val: 35, minSize: 5, maxSize: 14, ring: 65, sim: 80, frames: 2, cooldown: 3,
               beep: true, voice: true, vib: true, showMask: true };
 
 let S = load();
 function load() {
   let o = {};
   try { o = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) {}
-  const s = Object.assign({}, DEF, { rect: null, zones: null, samples: [], ignore: null }, o);
-  if (!Array.isArray(s.zones) || s.zones.length !== GRID * GRID) s.zones = new Array(GRID * GRID).fill(1);
+  if (o.ver !== VER) { // eski sürümden geçiş: yeni varsayılanları uygula, minimap ve örnekleri koru
+    o.minSize = DEF.minSize; o.maxSize = DEF.maxSize; o.cooldown = DEF.cooldown; o.frames = DEF.frames; o.ver = VER;
+  }
+  delete o.zones; delete o.ignore;
+  const s = Object.assign({}, DEF, { rect: null, samples: [] }, o);
   if (!Array.isArray(s.samples)) s.samples = [];
   return s;
 }
@@ -201,6 +198,25 @@ function components(m, W, H) {
   }
   return out;
 }
+// Şampiyon ikonu = kırmızı HALKA (ortası boş). Kule ve minyonlar halka değil.
+function ringScore(raw, W, H, cx, cy, R) {
+  const N = 24; let hit = 0;
+  for (let k = 0; k < N; k++) {
+    const a = k / N * 2 * Math.PI, ca = Math.cos(a), sa = Math.sin(a);
+    for (let rr = R * 0.5; rr <= R * 1.15; rr += 0.5) {
+      const x = Math.round(cx + ca * rr), y = Math.round(cy + sa * rr);
+      if (x >= 0 && y >= 0 && x < W && y < H && raw[y * W + x]) { hit++; break; }
+    }
+  }
+  let cin = 0, ctot = 0; const r0 = R * 0.4, r02 = r0 * r0;
+  for (let y = Math.floor(cy - r0); y <= Math.ceil(cy + r0); y++)
+    for (let x = Math.floor(cx - r0); x <= Math.ceil(cx + r0); x++) {
+      if (x < 0 || y < 0 || x >= W || y >= H) continue;
+      const dx = x - cx, dy = y - cy; if (dx * dx + dy * dy > r02) continue;
+      ctot++; if (raw[y * W + x]) cin++;
+    }
+  return { ring: hit / N, fill: ctot ? cin / ctot : 1 };
+}
 
 let last = null, fpsT = 0, fpsN = 0, fps = 0;
 function processFrame() {
@@ -213,25 +229,24 @@ function processFrame() {
   const raw = new Uint8Array(W * H);
   for (let p = 0, i = 0; p < W * H; p++, i += 4) if (isRed(data[i], data[i + 1], data[i + 2])) raw[p] = 1;
   const comps = components(dilate(raw, W, H), W, H);
-  const ign = (S.ignore && S.ignore.W === W && S.ignore.H === H) ? S.ignore.boxes : [];
   const useSamples = S.samples.length > 0;
   const blobs = [];
   for (const c of comps) {
     const bw = c.x1 - c.x0 + 1, bh = c.y1 - c.y0 + 1;
     const size = Math.max(bw, bh) / W * 100;
-    if (size < S.minSize || size > S.maxSize) continue;
-    if (Math.min(bw, bh) / Math.max(bw, bh) < 0.5) continue;
+    if (size < S.minSize || size > S.maxSize) continue;             // minyonlar (küçük) ve büyük lekeler elenir
     const cx = (c.x0 + c.x1) / 2, cy = (c.y0 + c.y1) / 2;
     const b = { x0: c.x0, y0: c.y0, x1: c.x1, y1: c.y1, cx, cy, size };
-    const cell = Math.min(GRID - 1, Math.floor(cy / H * GRID)) * GRID + Math.min(GRID - 1, Math.floor(cx / W * GRID));
-    b.watched = !!S.zones[cell];
-    b.ignored = ign.some(q => cx >= q[0] && cx <= q[2] && cy >= q[1] && cy <= q[3]);
-    if (useSamples) {
+    const aspect = Math.min(bw, bh) / Math.max(bw, bh);
+    const R = (bw + bh) / 4 - 0.5;
+    const rs = ringScore(raw, W, H, cx, cy, R);
+    b.ringPct = rs.ring;
+    b.round = aspect >= 0.7 && rs.ring >= S.ring / 100 && rs.fill < 0.4; // kuleler elenir
+    if (b.round && useSamples) {
       const hst = histFrom(data, W, H, cx, cy, Math.min(bw, bh) * 0.36);
       b.sim = Math.max(...S.samples.map(s => bhat(hst, s.h)));
-      b.jg = b.sim >= S.sim / 100;
-    } else b.jg = true;
-    b.hit = b.watched && !b.ignored && b.jg;
+      b.hit = b.sim >= S.sim / 100;
+    } else b.hit = b.round;
     blobs.push(b);
   }
   last = { W, H, data, raw, comps, blobs };
@@ -242,23 +257,29 @@ function processFrame() {
 }
 
 /* ---------- Uyarı mantığı ---------- */
-let present = false, hitRun = 0, missRun = 0, lastAlert = -1e9, alertLog = [];
+// - Jungler her yeniden göründüğünde hemen uyarır
+// - Görünür kaldıkça her "cooldown" saniyede bir tekrar uyarır
+// - Koridor değiştirirse (üst/orta/alt) hemen tekrar uyarır
+let present = false, hitRun = 0, missRun = 0, lastAlert = -1e9, lastPos = null, alertLog = [];
 function decide(hits) {
   if (hits.length) { hitRun++; missRun = 0; } else { missRun++; hitRun = 0; }
-  if (!present && hitRun >= S.frames) {
+  const now = performance.now();
+  if (hits.length && (present || hitRun >= S.frames)) {
+    const b = hits.reduce((a, c) => ((c.sim || 0) > (a.sim || 0) ? c : a));
+    const pos = where(b);
+    const since = now - lastAlert;
+    let fire = false;
+    if (!present) fire = since >= 1500;
+    else if (S.cooldown > 0 && since >= S.cooldown * 1000) fire = true;
+    else if (pos !== lastPos && since >= 1500) fire = true;
     present = true;
-    const now = performance.now();
-    if (now - lastAlert >= S.cooldown * 1000) {
-      lastAlert = now;
-      const b = hits.reduce((a, c) => ((c.sim || 0) > (a.sim || 0) ? c : a));
-      fireAlert(where(b));
-    }
+    if (fire) { lastAlert = now; lastPos = pos; fireAlert(pos); }
   }
-  if (present && missRun >= 10) present = false;
+  if (present && missRun >= 6) present = false;
   setState(present ? 'alert' : 'on');
 }
 function where(b) {
-  const s = b.cx / last.W + b.cy / last.H; // minimap'te üst koridor sol/üst kenarda, alt koridor sağ/alt kenarda
+  const s = b.cx / last.W + b.cy / last.H; // üst koridor sol/üst kenarda, alt koridor sağ/alt kenarda
   return s < 0.8 ? 'üstte' : s > 1.2 ? 'altta' : 'ortada';
 }
 function fireAlert(pos) {
@@ -278,7 +299,8 @@ function unlockAudio() {
 }
 function beep() {
   if (!actx) return;
-  const t = actx.currentTime;
+  if (actx.state !== 'running') actx.resume();
+  const t = actx.currentTime + 0.02;
   [0, 0.17, 0.34].forEach((d, i) => {
     const o = actx.createOscillator(), g = actx.createGain();
     o.type = 'square'; o.frequency.value = i % 2 ? 660 : 990;
@@ -290,9 +312,10 @@ function beep() {
 }
 function speak(txt) {
   if (!('speechSynthesis' in window)) return;
-  speechSynthesis.cancel();
+  const ss = window.speechSynthesis;
+  ss.cancel(); ss.resume();
   const u = new SpeechSynthesisUtterance(txt); u.lang = 'tr-TR'; u.rate = 1.25;
-  speechSynthesis.speak(u);
+  setTimeout(() => ss.speak(u), 60); // cancel'dan hemen sonra speak bazı telefonlarda sessiz kalıyor
 }
 
 /* ---------- Çizim ---------- */
@@ -306,21 +329,10 @@ function render() {
     vctx.fillStyle = 'rgba(0,255,255,.6)';
     for (let p = 0; p < W * H; p++) if (raw[p]) { const x = p % W; vctx.fillRect(x * sc, (p - x) / W * sc, sc, sc); }
   }
-  const cw = W * sc / GRID, ch = H * sc / GRID;
-  vctx.fillStyle = 'rgba(0,0,0,.65)';
-  for (let i = 0; i < GRID * GRID; i++) if (!S.zones[i]) vctx.fillRect((i % GRID) * cw, Math.floor(i / GRID) * ch, cw, ch);
-  if (tapMode === 'zone') {
-    vctx.strokeStyle = 'rgba(255,255,255,.25)'; vctx.lineWidth = 1; vctx.beginPath();
-    for (let i = 1; i < GRID; i++) { vctx.moveTo(i * cw, 0); vctx.lineTo(i * cw, H * sc); vctx.moveTo(0, i * ch); vctx.lineTo(W * sc, i * ch); }
-    vctx.stroke();
-  }
-  if (S.ignore && S.ignore.W === W && S.ignore.H === H) {
-    vctx.strokeStyle = 'rgba(160,160,160,.6)'; vctx.setLineDash([3, 3]);
-    for (const q of S.ignore.boxes) vctx.strokeRect(q[0] * sc, q[1] * sc, (q[2] - q[0]) * sc, (q[3] - q[1]) * sc);
-    vctx.setLineDash([]);
-  }
-  vctx.font = 'bold 13px sans-serif'; vctx.lineWidth = 2;
+  vctx.font = 'bold 13px sans-serif';
   for (const b of blobs) {
+    vctx.lineWidth = b.round ? 2 : 1;
+    vctx.setLineDash(b.round ? [] : [3, 3]);
     vctx.strokeStyle = b.hit ? '#ff2d2d' : '#9ca3af';
     vctx.strokeRect(b.x0 * sc - 2, b.y0 * sc - 2, (b.x1 - b.x0 + 1) * sc + 4, (b.y1 - b.y0 + 1) * sc + 4);
     if (b.sim !== undefined) {
@@ -328,7 +340,9 @@ function render() {
       vctx.fillText(Math.round(b.sim * 100) + '%', b.x1 * sc + 4, b.y0 * sc + 10);
     }
   }
-  $('info').textContent = `${fps.toFixed(1)} fps · ${blobs.length} düşman adayı · ${blobs.filter(b => b.hit).length} uyarı tetikleyen` +
+  vctx.setLineDash([]);
+  const champs = blobs.filter(b => b.round).length;
+  $('info').textContent = `${fps.toFixed(1)} fps · ${champs} düşman şampiyon · ${blobs.length - champs} yuvarlak olmayan (yok sayıldı)` +
     (alertLog.length ? '\nSon uyarılar:\n' + alertLog.join('\n') : '');
 }
 function drawOverlay() {
@@ -416,11 +430,8 @@ overlay.addEventListener('pointerup', () => {
   if (!dragStart) return;
   const r = normRect(dragStart, dragCur); dragStart = dragCur = null;
   if (r.w < 0.01 || r.h < 0.01) return;
-  if (dragMode === 'minimap') {
-    S.rect = r; S.ignore = null; save(); toast('Minimap ayarlandı ✔');
-  } else if (dragMode === 'sample') {
-    sampleFromScreen(r);
-  }
+  if (dragMode === 'minimap') { S.rect = r; save(); toast('Minimap ayarlandı ✔'); }
+  else if (dragMode === 'sample') sampleFromScreen(r);
   setDragMode(null);
 });
 function sampleFromScreen(r) {
@@ -433,28 +444,26 @@ function sampleFromScreen(r) {
 }
 
 /* ---------- Analiz görüntüsüne dokunma ---------- */
-let tapMode = null, painting = null;
-document.querySelectorAll('[data-tap]').forEach(b => b.onclick = () => {
-  tapMode = tapMode === b.dataset.tap ? null : b.dataset.tap;
+let tapMode = null;
+function setTapMode(m) {
+  tapMode = m;
   document.querySelectorAll('[data-tap]').forEach(x => x.classList.toggle('active', x.dataset.tap === tapMode));
   roiView.style.touchAction = tapMode ? 'none' : 'auto';
+}
+document.querySelectorAll('[data-tap]').forEach(b => b.onclick = () => {
+  setTapMode(tapMode === b.dataset.tap ? null : b.dataset.tap);
   if (tapMode === 'sample') toast('Minimapteki düşman jungler ikonuna dokun');
   if (tapMode === 'red') toast('Bir düşman ikonunun kırmızı çerçevesine dokun');
-  if (tapMode === 'zone') toast('İzlenmeyecek hücreleri boya');
-  render();
 });
 function roiPos(e) { const r = roiView.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * last.W, y: (e.clientY - r.top) / r.height * last.H }; }
-function cellAt(p) { return Math.min(GRID - 1, Math.max(0, Math.floor(p.y / last.H * GRID))) * GRID + Math.min(GRID - 1, Math.max(0, Math.floor(p.x / last.W * GRID))); }
 roiView.addEventListener('pointerdown', e => {
   if (!last || !tapMode) return;
-  e.preventDefault(); roiView.setPointerCapture(e.pointerId);
+  e.preventDefault();
   const p = roiPos(e);
-  if (tapMode === 'zone') { const c = cellAt(p); painting = S.zones[c] ? 0 : 1; S.zones[c] = painting; render(); }
-  else if (tapMode === 'sample') sampleAt(p);
+  if (tapMode === 'sample') sampleAt(p);
   else if (tapMode === 'red') redAt(p);
+  setTapMode(null);
 });
-roiView.addEventListener('pointermove', e => { if (painting !== null && tapMode === 'zone' && last) { S.zones[cellAt(roiPos(e))] = painting; render(); } });
-roiView.addEventListener('pointerup', () => { if (painting !== null) { painting = null; save(); } });
 
 function sampleAt(p) {
   const { W, H, data, comps } = last;
@@ -470,9 +479,6 @@ function sampleAt(p) {
   const R = best.half + 1;
   t.getContext('2d').drawImage(work, best.cx - R, best.cy - R, 2 * R, 2 * R, 0, 0, 40, 40);
   addSample(histFrom(data, W, H, best.cx, best.cy, best.half * 0.72), t.toDataURL('image/jpeg', 0.7));
-  tapMode = null;
-  document.querySelectorAll('[data-tap]').forEach(x => x.classList.remove('active'));
-  roiView.style.touchAction = 'auto';
 }
 function addSample(h, thumb) {
   S.samples.push({ h, t: thumb });
@@ -496,7 +502,7 @@ function redAt(p) {
 function renderSamples() {
   $('samples').innerHTML = S.samples.length
     ? S.samples.map(s => `<img src="${s.t}" alt="">`).join('') + `<span class="hint" style="margin:0 6px">${S.samples.length} jungler örneği</span>`
-    : '<span class="hint" style="margin:0">Jungler örneği yok → izlenen bölgelerdeki <b>tüm</b> düşmanlarda uyarır.</span>';
+    : '<span class="hint" style="margin:0">Jungler örneği yok → <b>tüm</b> düşman şampiyonlarda uyarır.</span>';
 }
 
 /* ---------- Butonlar & ayarlar ---------- */
@@ -504,13 +510,6 @@ $('btnStart').onclick = startCam;
 $('btnSelect').onclick = () => { if (!stream) return toast('Önce kamerayı başlat'); setDragMode('minimap'); };
 $('btnScreenSample').onclick = () => { if (!stream) return toast('Önce kamerayı başlat'); setDragMode('sample'); };
 $('btnTest').onclick = () => { unlockAudio(); fireAlert('altta'); };
-$('btnIgnore').onclick = () => {
-  if (!last) return toast('Önce minimap seç');
-  S.ignore = { W: last.W, H: last.H, boxes: last.comps.map(c => [c.x0 - 2, c.y0 - 2, c.x1 + 2, c.y1 + 2]) };
-  save(); toast(last.comps.length + ' kırmızı nesne yok sayıldı');
-};
-$('btnClearIgnore').onclick = () => { S.ignore = null; save(); toast('Temizlendi'); };
-$('btnZonesAll').onclick = () => { S.zones = new Array(GRID * GRID).fill(1); save(); render(); };
 $('btnClearSamples').onclick = () => { S.samples = []; save(); renderSamples(); };
 $('btnReset').onclick = () => { Object.assign(S, DEF); syncInputs(); save(); toast('Varsayılanlar yüklendi'); };
 
